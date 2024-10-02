@@ -326,3 +326,135 @@ def kmeans_segmentation(img, k=3, cycles_pos=1):
     plot_img(3, (9, 4.5), ["Original", "Segmented", "Segmented (cleaned)"], [img, segmented_img, pos_image])
 
     return segmented_img
+
+def kmeans_segmentation(img, k=3, cycles_pos=1):
+    """
+    K-means segmentation of an image with k clusters. Each pixel will be assigned the mean color of its cluster.
+
+    Parameters:
+    - img (np.array): Input image in BGR format (from OpenCV).
+    - k (int): Number of clusters for K-means.
+    
+    Returns:
+    - segmented_img (np.array): Image where each pixel has the mean color of its cluster.
+    """
+    pixel_values = img.reshape((-1, 3))  # flatten image
+    pixel_values = np.float32(pixel_values)
+    
+    criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+    
+    _, labels, centers = cv.kmeans(pixel_values, k, None, criteria, 10, cv.KMEANS_RANDOM_CENTERS)
+    
+    centers = np.uint8(centers)
+    
+    segmented_img = centers[labels.flatten()]
+    
+    segmented_img = segmented_img.reshape(img.shape) # Reshape back to the original shape
+    
+    kernel_mor = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3)) # For opening and closing (cleaning segmentation)
+    for i in range(cycles_pos):
+        pos_image = cv.morphologyEx(segmented_img, cv.MORPH_OPEN, kernel_mor)
+        pos_image = cv.morphologyEx(pos_image, cv.MORPH_CLOSE, kernel_mor)
+
+    plot_img(3, (9, 4.5), ["Original", "Segmented", "Segmented (cleaned)"], [img, segmented_img, pos_image])
+
+    return segmented_img
+
+def Fuzzy_kmeans_segmentation(img, k=3, cycles_pos=1):
+    """
+    K-means segmentation of an image with k clusters. Each pixel will be assigned the mean color of its cluster.
+
+    Parameters:
+    - img (np.array): Input image in BGR format (from OpenCV).
+    - k (int): Number of clusters for K-means.
+    
+    Returns:
+    - segmented_img (np.array): Image where each pixel has the mean color of its cluster.
+    """
+    pixel_values = img.reshape((-1, 3))  # flatten image
+    pixel_values = np.float32(pixel_values)
+    
+    pixel_values = pixel_values.T
+
+    cntr, u, _, _, _, _, _ = fuzz.cluster.cmeans(pixel_values, k, 2, error=0.005, maxiter=1000)    
+    labels = np.argmax(u, axis=0)
+    
+    centers = np.uint8(cntr)
+    
+    segmented_img = centers[labels]
+        
+    segmented_img = segmented_img.reshape(img.shape)
+    
+    kernel_mor = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3)) # For opening and closing (cleaning segmentation)
+    for i in range(cycles_pos):
+        pos_image = cv.morphologyEx(segmented_img, cv.MORPH_OPEN, kernel_mor)
+        pos_image = cv.morphologyEx(pos_image, cv.MORPH_CLOSE, kernel_mor)
+
+    plot_img(3, (9, 4.5), ["Original", "Segmented", "Segmented (cleaned)"], [img, segmented_img, pos_image])
+
+    return segmented_img
+
+def outsu_segmentation(img, cycles_pos):
+
+    img = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+    
+    hist, bins = np.histogram(img.flatten(), 256, [0, 256])
+    pixel_prob = hist / hist.sum()    
+    omega = np.cumsum(pixel_prob)
+    mean_cumulative = np.cumsum(np.arange(256) * pixel_prob)
+    global_mean = mean_cumulative[-1]
+    
+    omega[omega == 0] = 1e-6
+    
+    omega_inv = 1 - omega
+    
+    sigma_b_squared = (global_mean * omega - mean_cumulative) ** 2 / (omega * omega_inv)
+    
+    optimal_threshold = np.argmax(sigma_b_squared)
+    
+    _, segmented_image = cv2.threshold(img, optimal_threshold, 255, cv2.THRESH_BINARY)
+
+    segmented_img = -segmented_image+255
+
+    kernel_mor = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3)) # For opening and closing (cleaning segmentation)
+    pos_image = segmented_img
+    
+    for i in range(cycles_pos):
+        pos_image = cv.morphologyEx(pos_image, cv.MORPH_OPEN, kernel_mor)
+        pos_image = cv.morphologyEx(pos_image, cv.MORPH_CLOSE, kernel_mor)
+    edges = cv2.Canny(pos_image, 100, 200)
+    plot_img(4, (12, 6), ["Original", "Segmented", "Segmented (cleaned)", "edges"], [img, segmented_img, pos_image, edges])   
+    return pos_image
+
+def map_distance(img):
+    ret, thresh = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY) 
+    dist = cv2.distanceTransform(thresh, cv2.DIST_L2, 5) 
+    dist_output = cv2.normalize(dist, None, 0, 1.0, cv2.NORM_MINMAX)
+    kernel = np.ones((5, 5), np.uint8) 
+    plot_img(2, (8, 4), ["Original", "dist_output"], [img, dist_output])   
+
+def skeletonize_manual(binary_img):
+    skeleton = np.zeros(binary_img.shape, np.uint8)
+    
+    kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    
+    img = binary_img.copy()
+    
+    while True:
+        eroded = cv2.erode(img, kernel)
+        
+        opened = cv2.dilate(eroded, kernel)
+        
+        temp = cv2.subtract(img, opened)
+        
+        skeleton = cv2.bitwise_or(skeleton, temp)
+        
+        img = eroded.copy()
+        
+        if cv2.countNonZero(img) == 0:
+            break
+
+    plot_img(2, (8, 4), ["Original", "dist_output"], [binary_img, skeleton])   
+    return skeleton
+
+
