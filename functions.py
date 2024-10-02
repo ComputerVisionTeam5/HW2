@@ -394,7 +394,7 @@ def Fuzzy_kmeans_segmentation(img, k=3, cycles_pos=1):
 
     return segmented_img
 
-def outsu_segmentation(img, cycles_pos):
+def outsu_segmentation(img, cycles_pos, print_img=True):
 
     img = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
     
@@ -412,7 +412,7 @@ def outsu_segmentation(img, cycles_pos):
     
     optimal_threshold = np.argmax(sigma_b_squared)
     
-    _, segmented_image = cv2.threshold(img, optimal_threshold, 255, cv2.THRESH_BINARY)
+    _, segmented_image = cv.threshold(img, optimal_threshold, 255, cv.THRESH_BINARY)
 
     segmented_img = -segmented_image+255
 
@@ -422,39 +422,86 @@ def outsu_segmentation(img, cycles_pos):
     for i in range(cycles_pos):
         pos_image = cv.morphologyEx(pos_image, cv.MORPH_OPEN, kernel_mor)
         pos_image = cv.morphologyEx(pos_image, cv.MORPH_CLOSE, kernel_mor)
-    edges = cv2.Canny(pos_image, 100, 200)
-    plot_img(4, (12, 6), ["Original", "Segmented", "Segmented (cleaned)", "edges"], [img, segmented_img, pos_image, edges])   
+    edges = cv.Canny(pos_image, 100, 200)
+    if print_img:
+        plot_img(4, (12, 6), ["Original", "Segmented", "Segmented (cleaned)", "edges"], [img, segmented_img, pos_image, edges])   
     return pos_image
 
 def map_distance(img):
-    ret, thresh = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY) 
-    dist = cv2.distanceTransform(thresh, cv2.DIST_L2, 5) 
-    dist_output = cv2.normalize(dist, None, 0, 1.0, cv2.NORM_MINMAX)
+    ret, thresh = cv.threshold(img, 127, 255, cv.THRESH_BINARY) 
+    dist = cv.distanceTransform(thresh, cv.DIST_L2, 5) 
+    dist_output = cv.normalize(dist, None, 0, 1.0, cv.NORM_MINMAX)
     kernel = np.ones((5, 5), np.uint8) 
     plot_img(2, (8, 4), ["Original", "dist_output"], [img, dist_output])   
 
 def skeletonize_manual(binary_img):
     skeleton = np.zeros(binary_img.shape, np.uint8)
     
-    kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    kernel = cv.getStructuringElement(cv.MORPH_CROSS, (3, 3))
     
     img = binary_img.copy()
     
     while True:
-        eroded = cv2.erode(img, kernel)
+        eroded = cv.erode(img, kernel)
         
-        opened = cv2.dilate(eroded, kernel)
+        opened = cv.dilate(eroded, kernel)
         
-        temp = cv2.subtract(img, opened)
+        temp = cv.subtract(img, opened)
         
-        skeleton = cv2.bitwise_or(skeleton, temp)
+        skeleton = cv.bitwise_or(skeleton, temp)
         
         img = eroded.copy()
         
-        if cv2.countNonZero(img) == 0:
+        if cv.countNonZero(img) == 0:
             break
 
     plot_img(2, (8, 4), ["Original", "dist_output"], [binary_img, skeleton])   
     return skeleton
 
+def pipeline_features(color_img):
+    copy_img = color_img.copy()
+    binary_img = outsu_segmentation(color_img,1,False)
+    _, binary_img = cv.threshold(binary_img, 127, 255, cv.THRESH_BINARY)
+    num_labels, labels = cv.connectedComponents(binary_img)
 
+    label_hue = np.uint8(179 * labels / np.max(labels)) 
+    blank_ch = 255 * np.ones_like(label_hue)
+
+    labeled_image = cv.merge([label_hue, blank_ch, blank_ch])
+    labeled_image = cv.cvtColor(labeled_image, cv.COLOR_HSV2BGR)  
+    labeled_image[label_hue == 0] = 0
+    
+    for i in range(1, num_labels): 
+        component_mask = np.uint8(labels == i) * 255  # Binary mask for the current component
+
+        contours, _ = cv.findContours(component_mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+
+        perimeter = cv.arcLength(contours[0], True)
+        area = cv.contourArea(contours[0])
+        moments = cv.moments(contours[0])
+        hu_moments = cv.HuMoments(moments).flatten()
+
+        print(f"Component {i}:")
+        print(f"  Perimeter: {perimeter:.2f} pixels")
+        print(f"  Area: {area:.2f} pixels^2")
+        print(f"  Hu Moments: {hu_moments}")
+
+        masked_color_image = cv.bitwise_and(color_img, color_img, mask=component_mask)
+
+        for j, color_name in enumerate(['Blue', 'Green', 'Red']):
+            # Extract the color channel
+            color_channel = masked_color_image[:, :, j]
+            
+            # Only consider the pixels belonging to the component (non-zero in mask)
+            component_pixels = color_channel[component_mask > 0]
+            
+            # Compute mean and variance
+            mean_color = np.mean(component_pixels)
+            variance_color = np.var(component_pixels)
+
+            # Display the results for this color channel
+            print(f"  {color_name} Channel - Mean: {mean_color:.2f}, Variance: {variance_color:.2f}")
+
+        cv.drawContours(copy_img, contours, -1, (0, 255, 0), 2)
+
+    plot_img(3, (9, 4.5), ["Color image (contoured)", "Binary", "Connected"], [copy_img, binary_img, labeled_image])
